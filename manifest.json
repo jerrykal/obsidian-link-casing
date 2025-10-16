@@ -1,6 +1,6 @@
 {
 	"id": "obsidian-link-casing",
-	"name": "Obsidian Link Casing",
+	"name": "Link Casing",
 	"version": "1.0.0",
 	"minAppVersion": "0.15.0",
 	"description": "Automatically applies casing aliases to wiki links using inline commands.",
