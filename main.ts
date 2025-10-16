@@ -1,134 +1,141 @@
-import { App, Editor, MarkdownView, Modal, Notice, Plugin, PluginSettingTab, Setting } from 'obsidian';
+import { Editor, Plugin } from 'obsidian';
 
-// Remember to rename these classes and interfaces!
+export default class LinkCasingPlugin extends Plugin {
+	private isApplying: boolean = false;
 
-interface MyPluginSettings {
-	mySetting: string;
-}
-
-const DEFAULT_SETTINGS: MyPluginSettings = {
-	mySetting: 'default'
-}
-
-export default class MyPlugin extends Plugin {
-	settings: MyPluginSettings;
+	// Match wiki links ending with a casing command and optional double backslash
+	// [[Link Name\l\\]] -> groups: [1]=Link Name, [2]=l, [3]=\\ (optional)
+	private static readonly LINK_CMD_RE = /\[\[([^\]|\\]+)\\([lutc])(\\\\)?\]\]/g;
 
 	async onload() {
-		await this.loadSettings();
+		// React to editor changes (typing, paste, etc.) to transform links automatically
+		this.registerEvent(this.app.workspace.on('editor-change', (editor: Editor) => {
+			if (!editor) return;
+			this.applyTransformToEditor(editor);
+		}));
+	}
 
-		// This creates an icon in the left ribbon.
-		const ribbonIconEl = this.addRibbonIcon('dice', 'Sample Plugin', (_evt: MouseEvent) => {
-			// Called when the user clicks the icon.
-			new Notice('This is a notice!');
-		});
-		// Perform additional things with the ribbon
-		ribbonIconEl.addClass('my-plugin-ribbon-class');
+	// ---- Core transformation helpers ----
 
-		// This adds a status bar item to the bottom of the app. Does not work on mobile apps.
-		const statusBarItemEl = this.addStatusBarItem();
-		statusBarItemEl.setText('Status Bar Text');
+	private toLower(input: string): string {
+		return input.toLowerCase();
+	}
 
-		// This adds a simple command that can be triggered anywhere
-		this.addCommand({
-			id: 'open-sample-modal-simple',
-			name: 'Open sample modal (simple)',
-			callback: () => {
-				new SampleModal(this.app).open();
+	private toUpper(input: string): string {
+		return input.toUpperCase();
+	}
+
+	private toTitleCase(input: string): string {
+		// Lowercase then capitalize first letter of each word (Unicode-aware)
+		return input
+			.toLowerCase()
+			.replace(/\b(\p{L})([\p{L}\p{M}]*)/gu, (_m, first: string, rest: string) => first.toUpperCase() + rest);
+	}
+
+	private toCapitalCase(input: string): string {
+		const lower = input.toLowerCase();
+		if (lower.length === 0) return lower;
+		return lower[0].toUpperCase() + lower.slice(1);
+	}
+
+	private transformContent(input: string): string {
+		const replacer = (_full: string, linkTarget: string, cmd: string): string => {
+			let alias: string = linkTarget;
+			switch (cmd) {
+				case 'l':
+					alias = this.toLower(linkTarget);
+					break;
+				case 'u':
+					alias = this.toUpper(linkTarget);
+					break;
+				case 't':
+					alias = this.toTitleCase(linkTarget);
+					break;
+				case 'c':
+					alias = this.toCapitalCase(linkTarget);
+					break;
+				default:
+					alias = linkTarget;
 			}
-		});
-		// This adds an editor command that can perform some operation on the current editor instance
-		this.addCommand({
-			id: 'sample-editor-command',
-			name: 'Sample editor command',
-			editorCallback: (editor: Editor, _view: MarkdownView) => {
-				console.log(editor.getSelection());
-				editor.replaceSelection('Sample Editor Command');
-			}
-		});
-		// This adds a complex command that can check whether the current state of the app allows execution of the command
-		this.addCommand({
-			id: 'open-sample-modal-complex',
-			name: 'Open sample modal (complex)',
-			checkCallback: (checking: boolean) => {
-				// Conditions to check
-				const markdownView = this.app.workspace.getActiveViewOfType(MarkdownView);
-				if (markdownView) {
-					// If checking is true, we're simply "checking" if the command can be run.
-					// If checking is false, then we want to actually perform the operation.
-					if (!checking) {
-						new SampleModal(this.app).open();
-					}
+			return `[[${linkTarget}|${alias}]]`;
+		};
 
-					// This command will only show up in Command Palette when the check function returns true
-					return true;
+		return input.replace(LinkCasingPlugin.LINK_CMD_RE, replacer);
+	}
+
+	private applyTransformToEditor(editor: Editor): void {
+		if (this.isApplying) return;
+		const original = editor.getValue();
+		// Capture current cursor offset so we can restore it precisely
+		const cursorPos = editor.getCursor();
+		const cursorOffset = editor.posToOffset(cursorPos);
+
+		// If the cursor is within a wiki-link casing command, we want to place it
+		// at the end of the transformed link (just after the closing ]] ).
+		let enclosingMatchStart: number | null = null;
+		let transformedMatchText: string | null = null;
+		let transformedPrefixLength: number | null = null;
+
+		// Find enclosing match and compute transformed text lengths in a way that
+		// accounts for earlier replacements that may change offsets.
+		const re = new RegExp(LinkCasingPlugin.LINK_CMD_RE);
+		re.lastIndex = 0;
+		let m: RegExpExecArray | null;
+		while ((m = re.exec(original)) !== null) {
+			const start = m.index;
+			const end = start + m[0].length;
+			if (cursorOffset >= start && cursorOffset <= end) {
+				// Build transformed string for this specific match
+				const linkTarget = m[1];
+				const cmd = m[2];
+				let alias = linkTarget;
+				switch (cmd) {
+					case 'l':
+						alias = this.toLower(linkTarget);
+						break;
+					case 'u':
+						alias = this.toUpper(linkTarget);
+						break;
+					case 't':
+						alias = this.toTitleCase(linkTarget);
+						break;
+					case 'c':
+						alias = this.toCapitalCase(linkTarget);
+						break;
+					default:
+						alias = linkTarget;
 				}
+				const matchTransformed = `[[${linkTarget}|${alias}]]`;
+
+				// Compute transformed length of everything before this match, to account
+				// for earlier replacements that may change offsets.
+				const prefixOriginal = original.slice(0, start);
+				const prefixTransformed = this.transformContent(prefixOriginal);
+				enclosingMatchStart = start;
+				transformedMatchText = matchTransformed;
+				transformedPrefixLength = prefixTransformed.length;
+				break;
 			}
-		});
+		}
 
-		// This adds a settings tab so the user can configure various aspects of the plugin
-		this.addSettingTab(new SampleSettingTab(this.app, this));
-
-		// If the plugin hooks up any global DOM events (on parts of the app that doesn't belong to this plugin)
-		// Using this function will automatically remove the event listener when this plugin is disabled.
-		this.registerDomEvent(document, 'click', (evt: MouseEvent) => {
-			console.log('click', evt);
-		});
-
-		// When registering intervals, this function will automatically clear the interval when the plugin is disabled.
-		this.registerInterval(window.setInterval(() => console.log('setInterval'), 5 * 60 * 1000));
-	}
-
-	onunload() {
-
-	}
-
-	async loadSettings() {
-		this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
-	}
-
-	async saveSettings() {
-		await this.saveData(this.settings);
-	}
-}
-
-class SampleModal extends Modal {
-	constructor(app: App) {
-		super(app);
-	}
-
-	onOpen() {
-		const {contentEl} = this;
-		contentEl.setText('Woah!');
-	}
-
-	onClose() {
-		const {contentEl} = this;
-		contentEl.empty();
-	}
-}
-
-class SampleSettingTab extends PluginSettingTab {
-	plugin: MyPlugin;
-
-	constructor(app: App, plugin: MyPlugin) {
-		super(app, plugin);
-		this.plugin = plugin;
-	}
-
-	display(): void {
-		const {containerEl} = this;
-
-		containerEl.empty();
-
-		new Setting(containerEl)
-			.setName('Setting #1')
-			.setDesc('It\'s a secret')
-			.addText(text => text
-				.setPlaceholder('Enter your secret')
-				.setValue(this.plugin.settings.mySetting)
-				.onChange(async (value) => {
-					this.plugin.settings.mySetting = value;
-					await this.plugin.saveSettings();
-				}));
+		const transformed = this.transformContent(original);
+		if (transformed !== original) {
+			this.isApplying = true;
+			try {
+				editor.setValue(transformed);
+				// Restore cursor: if we were inside a match, jump to end of the
+				// transformed link (just after the ]]).
+				if (
+					enclosingMatchStart !== null &&
+					transformedMatchText !== null &&
+					transformedPrefixLength !== null
+				) {
+					const newOffset = transformedPrefixLength + transformedMatchText.length;
+					editor.setCursor(editor.offsetToPos(newOffset));
+				}
+			} finally {
+				this.isApplying = false;
+			}
+		}
 	}
 }
