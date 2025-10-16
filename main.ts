@@ -57,7 +57,9 @@ export default class LinkCasingPlugin extends Plugin {
 				default:
 					alias = linkTarget;
 			}
-			return `[[${linkTarget}|${alias}]]`;
+			// If the transformation does not change the text, strip the inline command
+			// and do not add an alias — keep a plain wiki link.
+			return alias === linkTarget ? `[[${linkTarget}]]` : `[[${linkTarget}|${alias}]]`;
 		};
 
 		return input.replace(LinkCasingPlugin.LINK_CMD_RE, replacer);
@@ -105,7 +107,9 @@ export default class LinkCasingPlugin extends Plugin {
 					default:
 						alias = linkTarget;
 				}
-				const matchTransformed = `[[${linkTarget}|${alias}]]`;
+				const matchTransformed = (alias === linkTarget)
+					? `[[${linkTarget}]]`
+					: `[[${linkTarget}|${alias}]]`;
 
 				// Compute transformed length of everything before this match, to account
 				// for earlier replacements that may change offsets.
