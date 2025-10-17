@@ -1,13 +1,18 @@
-import { Editor, Plugin } from 'obsidian';
+import { Editor, Plugin, PluginSettingTab, Setting } from 'obsidian';
 
 export default class LinkCasingPlugin extends Plugin {
 	private isApplying: boolean = false;
+	settings: LinkCasingSettings;
 
 	// Match wiki links ending with a casing command and optional double backslash
 	// [[Link Name\l\\]] -> groups: [1]=Link Name, [2]=l, [3]=\\ (optional)
 	private static readonly LINK_CMD_RE = /\[\[([^\]|\\]+)\\([lutc])(\\\\)?\]\]/g;
 
 	async onload() {
+		// Load settings and register settings tab
+		this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
+		this.addSettingTab(new LinkCasingSettingTab(this.app, this));
+
 		// React to editor changes (typing, paste, etc.) to transform links automatically
 		this.registerEvent(this.app.workspace.on('editor-change', (editor: Editor) => {
 			if (!editor) return;
@@ -18,7 +23,9 @@ export default class LinkCasingPlugin extends Plugin {
 	// ---- Core transformation helpers ----
 
 	private toLower(input: string): string {
-		return input.toLowerCase();
+		if (!this.settings?.lowercaseFirstLetterOnly) return input.toLowerCase();
+		// Lowercase only the first Unicode letter, leaving the rest unchanged
+		return input.replace(/(\p{L})/u, (m: string) => m.toLowerCase());
 	}
 
 	private toUpper(input: string): string {
@@ -141,5 +148,38 @@ export default class LinkCasingPlugin extends Plugin {
 				this.isApplying = false;
 			}
 		}
+	}
+}
+
+// ---- Settings ----
+
+interface LinkCasingSettings {
+	lowercaseFirstLetterOnly: boolean;
+}
+
+const DEFAULT_SETTINGS: LinkCasingSettings = {
+	lowercaseFirstLetterOnly: false,
+};
+
+class LinkCasingSettingTab extends PluginSettingTab {
+	constructor(app: any, private plugin: LinkCasingPlugin) {
+		super(app, plugin);
+	}
+
+	display(): void {
+		const { containerEl } = this;
+		containerEl.empty();
+
+		new Setting(containerEl)
+			.setName('Lowercase only first letter for \\l')
+			.setDesc('If enabled, \\l makes only the first letter lowercase; default lowers all.')
+			.addToggle(t =>
+				t
+					.setValue(this.plugin.settings.lowercaseFirstLetterOnly)
+					.onChange(async (v) => {
+						this.plugin.settings.lowercaseFirstLetterOnly = v;
+						await this.plugin.saveData(this.plugin.settings);
+					})
+			);
 	}
 }
