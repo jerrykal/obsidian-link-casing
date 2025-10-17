@@ -11,6 +11,13 @@ Type casing commands directly in your wiki links, and the plugin replaces them w
 - `[[Link Name\t]]` → `[[Link Name|Link Name]]`
 - `[[link name\c]]` → `[[link name|Link name]]`
 
+You can also place the command immediately after the link:
+
+- `[[Link Name]]\l` → `[[Link Name|link name]]`
+- `[[Link Name|Alias]]\u` → `[[Link Name|ALIAS]]`
+
+The command must be adjacent to the closing `]]` (no spaces).
+
 You can also transform existing aliases by adding casing commands to the alias part:
 
 - `[[link name|alias\u]]` → `[[link name|ALIAS]]`

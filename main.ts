@@ -1,16 +1,24 @@
-import { Editor, Plugin, PluginSettingTab, Setting } from 'obsidian';
+import { Editor, Plugin, PluginSettingTab, Setting, App } from 'obsidian';
 
 export default class LinkCasingPlugin extends Plugin {
-	private isApplying: boolean = false;
+	private isApplying = false;
 	settings: LinkCasingSettings;
 
-	// Match wiki links ending with a casing command and optional double backslash
-	// [[Link Name\l\\]] -> groups: [1]=Link Name, [2]=l, [3]=\\ (optional)
-	private static readonly LINK_CMD_RE = /\[\[([^\]|\\]+)\\([lutc])(\\\\)?\]\]/g;
+	// Match wiki links ending with a casing command
+	// [[Link Name\l]] -> groups: [1]=Link Name, [2]=l
+	private static readonly LINK_CMD_RE = /\[\[([^\]|\\]+)\\([lutc])\]\]/g;
 
-	// Match wiki links with aliases ending with a casing command and optional double backslash
-	// [[link name|alias\u\\]] -> groups: [1]=link name, [2]=alias, [3]=u, [4]=\\ (optional)
-	private static readonly ALIAS_CMD_RE = /\[\[([^\]|]+)\|([^\]\\]+)\\([lutc])(\\\\)?\]\]/g;
+	// Match wiki links with aliases ending with a casing command
+	// [[link name|alias\u]] -> groups: [1]=link name, [2]=alias, [3]=u
+	private static readonly ALIAS_CMD_RE = /\[\[([^\]|]+)\|([^\]\\]+)\\([lutc])\]\]/g;
+
+	// Match wiki links followed by a postfix casing command (immediately after ]])
+	// [[Link Name]]\l -> groups: [1]=Link Name, [2]=l
+	private static readonly POSTFIX_LINK_CMD_RE = /\[\[([^\]|\\]+)\]\]\\([lutc])/g;
+
+	// Match wiki links with aliases followed by a postfix casing command
+	// [[link name|alias]]\u -> groups: [1]=link name, [2]=alias, [3]=u
+	private static readonly POSTFIX_ALIAS_CMD_RE = /\[\[([^\]|]+)\|([^\]]+)\]\]\\([lutc])/g;
 
 	async onload() {
 		// Load settings and register settings tab
@@ -50,7 +58,50 @@ export default class LinkCasingPlugin extends Plugin {
 	}
 
 	private transformContent(input: string): string {
-		// First, handle links with aliases that have casing commands
+		// First, handle postfix forms so they are consumed before in-link commands
+		const postfixAliasReplacer = (_full: string, linkTarget: string, aliasText: string, cmd: string): string => {
+			let transformedAlias: string = aliasText;
+			switch (cmd) {
+				case 'l':
+					transformedAlias = this.toLower(aliasText);
+					break;
+				case 'u':
+					transformedAlias = this.toUpper(aliasText);
+					break;
+				case 't':
+					transformedAlias = this.toTitleCase(aliasText);
+					break;
+				case 'c':
+					transformedAlias = this.toCapitalCase(aliasText);
+					break;
+				default:
+					transformedAlias = aliasText;
+			}
+			return `[[${linkTarget}|${transformedAlias}]]`;
+		};
+
+		const postfixLinkReplacer = (_full: string, linkTarget: string, cmd: string): string => {
+			let alias: string = linkTarget;
+			switch (cmd) {
+				case 'l':
+					alias = this.toLower(linkTarget);
+					break;
+				case 'u':
+					alias = this.toUpper(linkTarget);
+					break;
+				case 't':
+					alias = this.toTitleCase(linkTarget);
+					break;
+				case 'c':
+					alias = this.toCapitalCase(linkTarget);
+					break;
+				default:
+					alias = linkTarget;
+			}
+			return alias === linkTarget ? `[[${linkTarget}]]` : `[[${linkTarget}|${alias}]]`;
+		};
+
+		// Then, handle links with aliases that have casing commands
 		const aliasReplacer = (_full: string, linkTarget: string, aliasText: string, cmd: string): string => {
 			let transformedAlias: string = aliasText;
 			switch (cmd) {
@@ -96,8 +147,10 @@ export default class LinkCasingPlugin extends Plugin {
 			return alias === linkTarget ? `[[${linkTarget}]]` : `[[${linkTarget}|${alias}]]`;
 		};
 
-		// Apply alias transformations first, then link transformations
-		let result = input.replace(LinkCasingPlugin.ALIAS_CMD_RE, aliasReplacer);
+		// Apply transformations in order: postfix alias, postfix link, then in-link alias, in-link link
+		let result = input.replace(LinkCasingPlugin.POSTFIX_ALIAS_CMD_RE, postfixAliasReplacer);
+		result = result.replace(LinkCasingPlugin.POSTFIX_LINK_CMD_RE, postfixLinkReplacer);
+		result = result.replace(LinkCasingPlugin.ALIAS_CMD_RE, aliasReplacer);
 		return result.replace(LinkCasingPlugin.LINK_CMD_RE, linkReplacer);
 	}
 
@@ -116,18 +169,19 @@ export default class LinkCasingPlugin extends Plugin {
 
 		// Find enclosing match and compute transformed text lengths in a way that
 		// accounts for earlier replacements that may change offsets.
-		// Check both alias and link patterns
+		// Check postfix alias/link first, then in-link alias/link patterns
+		const postfixAliasRe = new RegExp(LinkCasingPlugin.POSTFIX_ALIAS_CMD_RE);
+		const postfixLinkRe = new RegExp(LinkCasingPlugin.POSTFIX_LINK_CMD_RE);
 		const aliasRe = new RegExp(LinkCasingPlugin.ALIAS_CMD_RE);
 		const linkRe = new RegExp(LinkCasingPlugin.LINK_CMD_RE);
 
-		// Check alias pattern first
-		aliasRe.lastIndex = 0;
+		// Check postfix alias pattern first
+		postfixAliasRe.lastIndex = 0;
 		let m: RegExpExecArray | null;
-		while ((m = aliasRe.exec(original)) !== null) {
+		while ((m = postfixAliasRe.exec(original)) !== null) {
 			const start = m.index;
 			const end = start + m[0].length;
 			if (cursorOffset >= start && cursorOffset <= end) {
-				// Build transformed string for this specific alias match
 				const linkTarget = m[1];
 				const aliasText = m[2];
 				const cmd = m[3];
@@ -149,15 +203,88 @@ export default class LinkCasingPlugin extends Plugin {
 						transformedAlias = aliasText;
 				}
 				const matchTransformed = `[[${linkTarget}|${transformedAlias}]]`;
-
-				// Compute transformed length of everything before this match, to account
-				// for earlier replacements that may change offsets.
 				const prefixOriginal = original.slice(0, start);
 				const prefixTransformed = this.transformContent(prefixOriginal);
 				enclosingMatchStart = start;
 				transformedMatchText = matchTransformed;
 				transformedPrefixLength = prefixTransformed.length;
 				break;
+			}
+		}
+
+		// If no postfix alias match, check postfix link pattern
+		if (enclosingMatchStart === null) {
+			postfixLinkRe.lastIndex = 0;
+			while ((m = postfixLinkRe.exec(original)) !== null) {
+				const start = m.index;
+				const end = start + m[0].length;
+				if (cursorOffset >= start && cursorOffset <= end) {
+					const linkTarget = m[1];
+					const cmd = m[2];
+					let alias = linkTarget;
+					switch (cmd) {
+						case 'l':
+							alias = this.toLower(linkTarget);
+							break;
+						case 'u':
+							alias = this.toUpper(linkTarget);
+							break;
+						case 't':
+							alias = this.toTitleCase(linkTarget);
+							break;
+						case 'c':
+							alias = this.toCapitalCase(linkTarget);
+							break;
+						default:
+							alias = linkTarget;
+					}
+					const matchTransformed = (alias === linkTarget) ? `[[${linkTarget}]]` : `[[${linkTarget}|${alias}]]`;
+					const prefixOriginal = original.slice(0, start);
+					const prefixTransformed = this.transformContent(prefixOriginal);
+					enclosingMatchStart = start;
+					transformedMatchText = matchTransformed;
+					transformedPrefixLength = prefixTransformed.length;
+					break;
+				}
+			}
+		}
+
+		// If still not found, check in-link alias pattern
+		if (enclosingMatchStart === null) {
+			aliasRe.lastIndex = 0;
+			let m: RegExpExecArray | null;
+			while ((m = aliasRe.exec(original)) !== null) {
+				const start = m.index;
+				const end = start + m[0].length;
+				if (cursorOffset >= start && cursorOffset <= end) {
+					const linkTarget = m[1];
+					const aliasText = m[2];
+					const cmd = m[3];
+					let transformedAlias = aliasText;
+					switch (cmd) {
+						case 'l':
+							transformedAlias = this.toLower(aliasText);
+							break;
+						case 'u':
+							transformedAlias = this.toUpper(aliasText);
+							break;
+						case 't':
+							transformedAlias = this.toTitleCase(aliasText);
+							break;
+						case 'c':
+							transformedAlias = this.toCapitalCase(aliasText);
+							break;
+						default:
+							transformedAlias = aliasText;
+					}
+					const matchTransformed = `[[${linkTarget}|${transformedAlias}]]`;
+					const prefixOriginal = original.slice(0, start);
+					const prefixTransformed = this.transformContent(prefixOriginal);
+					enclosingMatchStart = start;
+					transformedMatchText = matchTransformed;
+					transformedPrefixLength = prefixTransformed.length;
+					break;
+				}
 			}
 		}
 
@@ -237,7 +364,7 @@ const DEFAULT_SETTINGS: LinkCasingSettings = {
 };
 
 class LinkCasingSettingTab extends PluginSettingTab {
-	constructor(app: any, private plugin: LinkCasingPlugin) {
+	constructor(app: App, private plugin: LinkCasingPlugin) {
 		super(app, plugin);
 	}
 
