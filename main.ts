@@ -35,9 +35,9 @@ export default class LinkCasingPlugin extends Plugin {
 	// ---- Core transformation helpers ----
 
 	private toLower(input: string): string {
-		if (!this.settings?.lowercaseFirstLetterOnly) return input.toLowerCase();
-		// Lowercase only the first Unicode letter, leaving the rest unchanged
-		return input.replace(/(\p{L})/u, (m: string) => m.toLowerCase());
+		if (!this.settings?.lowercaseFirstWordOnly) return input.toLowerCase();
+		// Lowercase only the first word (Unicode-aware), leaving the rest unchanged
+		return input.replace(/^([\p{L}\p{M}']+)/u, (m: string) => m.toLowerCase());
 	}
 
 	private toUpper(input: string): string {
@@ -356,11 +356,11 @@ export default class LinkCasingPlugin extends Plugin {
 // ---- Settings ----
 
 interface LinkCasingSettings {
-	lowercaseFirstLetterOnly: boolean;
+	lowercaseFirstWordOnly: boolean;
 }
 
 const DEFAULT_SETTINGS: LinkCasingSettings = {
-	lowercaseFirstLetterOnly: false,
+	lowercaseFirstWordOnly: false,
 };
 
 class LinkCasingSettingTab extends PluginSettingTab {
@@ -373,13 +373,13 @@ class LinkCasingSettingTab extends PluginSettingTab {
 		containerEl.empty();
 
 		new Setting(containerEl)
-			.setName('Lowercase only first letter for \\l')
-			.setDesc('If enabled, \\l makes only the first letter lowercase; default lowers all.')
+			.setName('Lowercase only first word for \\l')
+			.setDesc('If enabled, \\l makes only the first word lowercase; default lowers all words.(This is useful if your note names are sentence-cased and you want to preserve capitalization in later words, such as proper names.)')
 			.addToggle(t =>
 				t
-					.setValue(this.plugin.settings.lowercaseFirstLetterOnly)
+					.setValue(this.plugin.settings.lowercaseFirstWordOnly)
 					.onChange(async (v) => {
-						this.plugin.settings.lowercaseFirstLetterOnly = v;
+						this.plugin.settings.lowercaseFirstWordOnly = v;
 						await this.plugin.saveData(this.plugin.settings);
 					})
 			);

@@ -25,12 +25,12 @@ You can also transform existing aliases by adding casing commands to the alias p
 - `[[link name|title case\t]]` → `[[link name|Title Case]]`
 - `[[link name|title case\c]]` → `[[link name|Title case]]`
 
-### Setting: Lowercase only first letter for `\l`
+### Setting: Lowercase only first word for `\l`
 
-By default, `\l` lowercases all letters. You can enable a setting to lowercase only the first letter (useful if your note names are sentence-cased and you want to preserve capitalization in later words, such as proper names).
+By default, `\l` lowercases all words. You can enable a setting to lowercase only the first word (useful if your note names are sentence-cased and you want to preserve capitalization in later words, such as proper names).
 
-- When enabled: `[[Link Name\l]]` → `[[Link Name|link Name]]` (only first letter lowercased)
-- When disabled (default): `[[Link Name\l]]` → `[[Link Name|link name]]` (all letters lowercased)
+- When enabled: `[[Link Name\l]]` → `[[Link Name|link Name]]` (only first word lowercased)
+- When disabled (default): `[[Link Name\l]]` → `[[Link Name|link name]]` (all words lowercased)
 
 This setting applies to both link targets and aliases when using the `\l` command.
 
