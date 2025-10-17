@@ -8,6 +8,10 @@ export default class LinkCasingPlugin extends Plugin {
 	// [[Link Name\l\\]] -> groups: [1]=Link Name, [2]=l, [3]=\\ (optional)
 	private static readonly LINK_CMD_RE = /\[\[([^\]|\\]+)\\([lutc])(\\\\)?\]\]/g;
 
+	// Match wiki links with aliases ending with a casing command and optional double backslash
+	// [[link name|alias\u\\]] -> groups: [1]=link name, [2]=alias, [3]=u, [4]=\\ (optional)
+	private static readonly ALIAS_CMD_RE = /\[\[([^\]|]+)\|([^\]\\]+)\\([lutc])(\\\\)?\]\]/g;
+
 	async onload() {
 		// Load settings and register settings tab
 		this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
@@ -46,7 +50,30 @@ export default class LinkCasingPlugin extends Plugin {
 	}
 
 	private transformContent(input: string): string {
-		const replacer = (_full: string, linkTarget: string, cmd: string): string => {
+		// First, handle links with aliases that have casing commands
+		const aliasReplacer = (_full: string, linkTarget: string, aliasText: string, cmd: string): string => {
+			let transformedAlias: string = aliasText;
+			switch (cmd) {
+				case 'l':
+					transformedAlias = this.toLower(aliasText);
+					break;
+				case 'u':
+					transformedAlias = this.toUpper(aliasText);
+					break;
+				case 't':
+					transformedAlias = this.toTitleCase(aliasText);
+					break;
+				case 'c':
+					transformedAlias = this.toCapitalCase(aliasText);
+					break;
+				default:
+					transformedAlias = aliasText;
+			}
+			return `[[${linkTarget}|${transformedAlias}]]`;
+		};
+
+		// Then, handle regular links with casing commands
+		const linkReplacer = (_full: string, linkTarget: string, cmd: string): string => {
 			let alias: string = linkTarget;
 			switch (cmd) {
 				case 'l':
@@ -69,7 +96,9 @@ export default class LinkCasingPlugin extends Plugin {
 			return alias === linkTarget ? `[[${linkTarget}]]` : `[[${linkTarget}|${alias}]]`;
 		};
 
-		return input.replace(LinkCasingPlugin.LINK_CMD_RE, replacer);
+		// Apply alias transformations first, then link transformations
+		let result = input.replace(LinkCasingPlugin.ALIAS_CMD_RE, aliasReplacer);
+		return result.replace(LinkCasingPlugin.LINK_CMD_RE, linkReplacer);
 	}
 
 	private applyTransformToEditor(editor: Editor): void {
@@ -87,36 +116,39 @@ export default class LinkCasingPlugin extends Plugin {
 
 		// Find enclosing match and compute transformed text lengths in a way that
 		// accounts for earlier replacements that may change offsets.
-		const re = new RegExp(LinkCasingPlugin.LINK_CMD_RE);
-		re.lastIndex = 0;
+		// Check both alias and link patterns
+		const aliasRe = new RegExp(LinkCasingPlugin.ALIAS_CMD_RE);
+		const linkRe = new RegExp(LinkCasingPlugin.LINK_CMD_RE);
+
+		// Check alias pattern first
+		aliasRe.lastIndex = 0;
 		let m: RegExpExecArray | null;
-		while ((m = re.exec(original)) !== null) {
+		while ((m = aliasRe.exec(original)) !== null) {
 			const start = m.index;
 			const end = start + m[0].length;
 			if (cursorOffset >= start && cursorOffset <= end) {
-				// Build transformed string for this specific match
+				// Build transformed string for this specific alias match
 				const linkTarget = m[1];
-				const cmd = m[2];
-				let alias = linkTarget;
+				const aliasText = m[2];
+				const cmd = m[3];
+				let transformedAlias = aliasText;
 				switch (cmd) {
 					case 'l':
-						alias = this.toLower(linkTarget);
+						transformedAlias = this.toLower(aliasText);
 						break;
 					case 'u':
-						alias = this.toUpper(linkTarget);
+						transformedAlias = this.toUpper(aliasText);
 						break;
 					case 't':
-						alias = this.toTitleCase(linkTarget);
+						transformedAlias = this.toTitleCase(aliasText);
 						break;
 					case 'c':
-						alias = this.toCapitalCase(linkTarget);
+						transformedAlias = this.toCapitalCase(aliasText);
 						break;
 					default:
-						alias = linkTarget;
+						transformedAlias = aliasText;
 				}
-				const matchTransformed = (alias === linkTarget)
-					? `[[${linkTarget}]]`
-					: `[[${linkTarget}|${alias}]]`;
+				const matchTransformed = `[[${linkTarget}|${transformedAlias}]]`;
 
 				// Compute transformed length of everything before this match, to account
 				// for earlier replacements that may change offsets.
@@ -126,6 +158,49 @@ export default class LinkCasingPlugin extends Plugin {
 				transformedMatchText = matchTransformed;
 				transformedPrefixLength = prefixTransformed.length;
 				break;
+			}
+		}
+
+		// If no alias match found, check link pattern
+		if (enclosingMatchStart === null) {
+			linkRe.lastIndex = 0;
+			while ((m = linkRe.exec(original)) !== null) {
+				const start = m.index;
+				const end = start + m[0].length;
+				if (cursorOffset >= start && cursorOffset <= end) {
+					// Build transformed string for this specific link match
+					const linkTarget = m[1];
+					const cmd = m[2];
+					let alias = linkTarget;
+					switch (cmd) {
+						case 'l':
+							alias = this.toLower(linkTarget);
+							break;
+						case 'u':
+							alias = this.toUpper(linkTarget);
+							break;
+						case 't':
+							alias = this.toTitleCase(linkTarget);
+							break;
+						case 'c':
+							alias = this.toCapitalCase(linkTarget);
+							break;
+						default:
+							alias = linkTarget;
+					}
+					const matchTransformed = (alias === linkTarget)
+						? `[[${linkTarget}]]`
+						: `[[${linkTarget}|${alias}]]`;
+
+					// Compute transformed length of everything before this match, to account
+					// for earlier replacements that may change offsets.
+					const prefixOriginal = original.slice(0, start);
+					const prefixTransformed = this.transformContent(prefixOriginal);
+					enclosingMatchStart = start;
+					transformedMatchText = matchTransformed;
+					transformedPrefixLength = prefixTransformed.length;
+					break;
+				}
 			}
 		}
 

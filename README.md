@@ -11,12 +11,21 @@ Type casing commands directly in your wiki links, and the plugin replaces them w
 - `[[Link Name\t]]` → `[[Link Name|Link Name]]`
 - `[[link name\c]]` → `[[link name|Link name]]`
 
+You can also transform existing aliases by adding casing commands to the alias part:
+
+- `[[link name|alias\u]]` → `[[link name|ALIAS]]`
+- `[[link name|ALIAS\l]]` → `[[link name|alias]]`
+- `[[link name|title case\t]]` → `[[link name|Title Case]]`
+- `[[link name|title case\c]]` → `[[link name|Title case]]`
+
 ### Setting: Lowercase only first letter for `\l`
 
 By default, `\l` lowercases all letters. You can enable a setting to lowercase only the first letter (useful if your note names are sentence-cased and you want to preserve capitalization in later words, such as proper names).
 
 - When enabled: `[[Link Name\l]]` → `[[Link Name|link Name]]` (only first letter lowercased)
 - When disabled (default): `[[Link Name\l]]` → `[[Link Name|link name]]` (all letters lowercased)
+
+This setting applies to both link targets and aliases when using the `\l` command.
 
 ## Install (local development)
 
